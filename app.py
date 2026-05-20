@@ -153,11 +153,11 @@ def obter_valor_item(item, nomes):
 
 def extrair_premios(item):
     campos_possiveis = [
-        ["m1", "M1", "milhar1", "primeiro", "primeiro_premio", "1"],
-        ["m2", "M2", "milhar2", "segundo", "segundo_premio", "2"],
-        ["m3", "M3", "milhar3", "terceiro", "terceiro_premio", "3"],
-        ["m4", "M4", "milhar4", "quarto", "quarto_premio", "4"],
-        ["m5", "M5", "milhar5", "quinto", "quinto_premio", "5"],
+        ["p1", "P1", "m1", "M1"],
+        ["p2", "P2", "m2", "M2"],
+        ["p3", "P3", "m3", "M3"],
+        ["p4", "P4", "m4", "M4"],
+        ["p5", "P5", "m5", "M5"],
     ]
 
     premios = []
