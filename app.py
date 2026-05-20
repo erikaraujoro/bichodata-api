@@ -221,8 +221,14 @@ def buscar_html_bichodata():
             timeout=60000
         )
 
-        # espera só o essencial
         page.wait_for_selector("text=PRÊMIO", timeout=15000)
+
+        # Faz scroll para carregar mais loterias
+        for _ in range(8):
+
+            page.mouse.wheel(0, 3000)
+
+            page.wait_for_timeout(1500)
 
         html = page.content()
 
