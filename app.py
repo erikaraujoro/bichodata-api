@@ -530,11 +530,24 @@ def health():
 
 @app.route("/preview")
 def preview():
-    resultados = buscar_resultados_bichodata()
-    return jsonify({
-        "total": len(resultados),
-        "resultados": resultados
-    })
+
+    try:
+
+        resultados = buscar_resultados_bichodata()
+
+        return jsonify({
+            "total": len(resultados),
+            "resultados": resultados
+        })
+
+    except Exception as e:
+
+        import traceback
+
+        return jsonify({
+            "erro": str(e),
+            "traceback": traceback.format_exc()
+        })
 
 
 @app.route("/atualizar")
