@@ -5,5 +5,4 @@ gspread==6.1.4
 google-auth==2.35.0
 APScheduler==3.10.4
 gunicorn==23.0.0
-playwright
 gunicorn
