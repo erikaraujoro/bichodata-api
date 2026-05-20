@@ -330,6 +330,43 @@ def preview():
             "traceback": traceback.format_exc(),
         }), 500
 
+@app.route("/debug-supabase")
+def debug_supabase():
+    hoje = datetime.now(TIMEZONE_DADOS).strftime("%Y-%m-%d")
+
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Accept": "application/json",
+    }
+
+    saida = {}
+
+    for tabela, loteria in TABELAS_SUPABASE.items():
+        url = f"{SUPABASE_URL}/{tabela}"
+        params = {
+            "select": "*",
+            "data": f"eq.{hoje}",
+            "limit": "3",
+        }
+
+        try:
+            resp = requests.get(url, headers=headers, params=params, timeout=30)
+            saida[tabela] = {
+                "status": resp.status_code,
+                "texto": resp.text[:2000],
+            }
+        except Exception as e:
+            saida[tabela] = {
+                "erro": str(e)
+            }
+
+    return jsonify({
+        "ok": True,
+        "data_consulta": hoje,
+        "resultado": saida
+    })
+
 
 @app.route("/atualizar")
 def atualizar_manual():
