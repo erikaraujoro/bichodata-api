@@ -201,48 +201,72 @@ def buscar_html_bichodata():
 
 
 def extrair_cards_resultados(html):
-    """
-    Extrai resultados da página atual.
-
-    A estratégia usa texto do HTML para localizar blocos com:
-    título, horário, data, colunas Prêmio/Milhar/Bicho/Grupo e linhas de prêmio.
-
-    Caso o site mude muito o layout, talvez precise ajuste nos seletores.
-    """
     soup = BeautifulSoup(html, "html.parser")
 
     cards = []
 
-    # Primeiro tenta capturar cards por texto.
-    # Procura elementos que contenham "PRÊMIO", "MILHAR", "BICHO", "GRUPO".
-    candidatos = []
-    for tag in soup.find_all(["div", "section", "article"]):
-        texto = tag.get_text(" ", strip=True)
-        txt_up = texto.upper()
-        if all(p in txt_up for p in ["PRÊMIO", "MILHAR", "BICHO", "GRUPO"]):
-            # Evita pegar blocos gigantes da página inteira
-            if len(texto) < 3000:
-                candidatos.append(tag)
+    titulos_conhecidos = [
+        "PTM - Manhã", "PT - Rio", "PT - Tarde", "PTV - Vesper", "PTN - Noite", "COR - Coruja",
+        "LOOK - 07H", "LOOK - 09H", "LOOK - 11H", "LOOK - 14H", "LOOK - 16H", "LOOK - 18H", "LOOK - 21H", "LOOK - 23H",
+        "Federal",
+        "NACIONAL - 02:00", "NACIONAL - 08:00", "NACIONAL - 10:00", "NACIONAL - 12:00",
+        "NACIONAL - 15:00", "NACIONAL - 17:00", "NACIONAL - 21:00", "NACIONAL - 23:00",
+        "SP - 08:00", "SP - 10:00", "SP - 12:00", "SP - 13:00", "SP - 15:30", "SP - 17:00", "SP - 19:00",
+        "LOTEP - 10:45", "LOTEP - 12:45", "LOTEP - 15:45", "LOTEP - 18:00",
+        "LOTECE - 12:00", "LOTECE - 14:00", "LOTECE - 15:45", "LOTECE - 19:00",
+        "BAHIA - 10:00", "BAHIA - 12:00", "BAHIA - 15:00", "BAHIA - 21:00",
+    ]
 
-    # Remove candidatos duplicados/filhos repetidos mantendo os menores úteis
-    unicos = []
-    textos_vistos = set()
-    for tag in candidatos:
-        texto = tag.get_text(" ", strip=True)
-        assinatura = texto[:500]
-        if assinatura not in textos_vistos:
-            textos_vistos.add(assinatura)
-            unicos.append(tag)
+    texto_pagina = soup.get_text("\n", strip=True)
+    texto_pagina = normalizar_texto(texto_pagina)
 
-    for card in unicos:
-        texto = card.get_text("\n", strip=True)
-        linhas = [normalizar_texto(x) for x in texto.splitlines() if normalizar_texto(x)]
+    # Divide a página em blocos começando por cada título conhecido.
+    posicoes = []
+    for titulo in titulos_conhecidos:
+        for m in re.finditer(re.escape(titulo), texto_pagina, flags=re.IGNORECASE):
+            posicoes.append((m.start(), titulo))
 
-        resultado = interpretar_linhas_card(linhas)
-        if resultado:
-            cards.append(resultado)
+    posicoes.sort(key=lambda x: x[0])
 
-    # Deduplica por data/título/horário/m1
+    for idx, (inicio, titulo_encontrado) in enumerate(posicoes):
+        fim = posicoes[idx + 1][0] if idx + 1 < len(posicoes) else len(texto_pagina)
+        bloco = texto_pagina[inicio:fim]
+
+        if "MILHAR" not in bloco.upper():
+            continue
+
+        data_match = re.search(r"\b\d{2}/\d{2}/\d{4}\b", bloco)
+        data = data_match.group(0) if data_match else ""
+
+        horario = extrair_horario_do_titulo(titulo_encontrado)
+        if not horario:
+            hora_match = re.search(r"\b\d{1,2}:\d{2}\b", bloco)
+            horario = pegar_horario_duas_casas(hora_match.group(0)) if hora_match else ""
+
+        premios = []
+
+        # Pega milhares depois de 1º, 2º, 3º, 4º e 5º
+        for pos in range(1, 6):
+            m = re.search(rf"\b{pos}º\s+(\d{{3,4}})\b", bloco)
+            if m:
+                premios.append(m.group(1).zfill(4))
+
+        # Se o HTML vier quebrado em linhas, faz fallback pegando as primeiras milhares do bloco
+        if len(premios) < 5:
+            milhares = re.findall(r"\b\d{4}\b", bloco)
+            premios = milhares[:5]
+
+        if len(premios) < 5:
+            continue
+
+        cards.append({
+            "titulo_site": titulo_sem_horario(titulo_encontrado),
+            "data": data,
+            "horario": horario,
+            "premios": premios[:5],
+        })
+
+    # Deduplica
     saida = []
     vistos = set()
     for r in cards:
