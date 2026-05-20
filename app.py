@@ -372,9 +372,17 @@ def debug_supabase():
 def atualizar_manual():
     try:
         retorno = atualizar_planilha()
-        return jsonify(retorno)
+
+        return jsonify({
+            "ok": retorno.get("ok"),
+            "inseridos": retorno.get("inseridos"),
+            "ignorados": retorno.get("ignorados_por_duplicidade"),
+            "executado_em": retorno.get("executado_em"),
+        })
+
     except Exception as e:
         logging.exception("Erro na atualização manual")
+
         return jsonify({
             "ok": False,
             "erro": str(e),
