@@ -203,7 +203,12 @@ def buscar_html_bichodata():
 
         browser = p.chromium.launch(
             headless=True,
-            args=["--no-sandbox"]
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--single-process"
+            ]
         )
 
         page = browser.new_page()
