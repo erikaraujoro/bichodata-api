@@ -199,19 +199,6 @@ from playwright.sync_api import sync_playwright
 
 def buscar_html_bichodata():
 
-    htmls = []
-
-    filtros = [
-        "Rio",
-        "Look",
-        "Fed",
-        "Nac",
-        "SP",
-        "Lotep",
-        "Lotece",
-        "Bahia",
-    ]
-
     with sync_playwright() as p:
 
         browser = p.chromium.launch(
@@ -220,35 +207,28 @@ def buscar_html_bichodata():
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
-                "--single-process"
+                "--single-process",
             ]
         )
 
         page = browser.new_page(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+            viewport={"width": 1280, "height": 720}
         )
 
-        # Página inicial
-        page.goto("https://bichodata.com", wait_until="networkidle", timeout=120000)
-        page.wait_for_timeout(5000)
-        htmls.append(page.content())
+        page.goto(
+            "https://bichodata.com/history",
+            wait_until="domcontentloaded",
+            timeout=60000
+        )
 
-        # Página histórico
-        page.goto("https://bichodata.com/history", wait_until="networkidle", timeout=120000)
-        page.wait_for_timeout(5000)
-        htmls.append(page.content())
+        # espera só o essencial
+        page.wait_for_selector("text=PRÊMIO", timeout=15000)
 
-        for filtro in filtros:
-            try:
-                page.get_by_text(filtro, exact=True).first.click(timeout=5000)
-                page.wait_for_timeout(5000)
-                htmls.append(page.content())
-            except Exception:
-                pass
+        html = page.content()
 
         browser.close()
 
-    return "\n".join(htmls)
+        return html
 
 
 def extrair_cards_resultados(html):
