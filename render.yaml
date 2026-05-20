@@ -5,10 +5,10 @@ services:
 
     envVars:
       - key: PLAYWRIGHT_BROWSERS_PATH
-        value: /opt/render/.cache/ms-playwright
+        value: "0"
 
     buildCommand: |
       pip install -r requirements.txt
-      python -m playwright install chromium
+      PLAYWRIGHT_BROWSERS_PATH=0 python -m playwright install chromium
 
     startCommand: gunicorn app:app
