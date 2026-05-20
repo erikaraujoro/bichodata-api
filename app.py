@@ -388,7 +388,7 @@ def atualizar_manual():
 scheduler = BackgroundScheduler(timezone=str(TIMEZONE))
 
 
-@scheduler.scheduled_job("interval", minutes=30)
+@scheduler.scheduled_job("interval", minutes=20)
 def tarefa_automatica():
     try:
         atualizar_planilha()
