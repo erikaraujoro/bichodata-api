@@ -211,9 +211,7 @@ def buscar_html_bichodata():
             ]
         )
 
-        page = browser.new_page(
-            viewport={"width": 1280, "height": 720}
-        )
+        page = browser.new_page(viewport={"width": 1280, "height": 720})
 
         page.goto(
             "https://bichodata.com/history",
@@ -223,15 +221,7 @@ def buscar_html_bichodata():
 
         page.wait_for_selector("text=PRÊMIO", timeout=15000)
 
-        # Faz scroll para carregar mais loterias
-        for _ in range(8):
-
-            page.mouse.wheel(0, 3000)
-
-            page.wait_for_timeout(1500)
-
         html = page.content()
-
         browser.close()
 
         return html
