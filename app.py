@@ -195,36 +195,88 @@ def titulo_sem_horario(titulo):
 # SCRAPING BICHODATA
 # =========================
 
-from playwright.sync_api import sync_playwright
+SUPABASE_URL = "https://rxshjetdbudpbqfegxjx.supabase.co/rest/v1"
 
-def buscar_html_bichodata():
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 
-    with sync_playwright() as p:
+TABELAS_SUPABASE = {
+    "resultados": "PT-RJ",
+    "resultado_nacional": "NACIONAL",
+    "resultados_lk": "LOOK-GO",
+    "resultados_sp": "PT-SP",
+    "resultados_bahia": "BAHIA",
+    "resultados_lotep_pb": "LOTEP",
+    "resultados_lotece_ce": "LOTECE",
+    "resultado_federal": "FEDERAL",
+}
 
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-                "--single-process",
+
+def buscar_resultados_bichodata():
+    hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%Y-%m-%d")
+
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Accept": "application/json",
+    }
+
+    resultados = []
+
+    for tabela, loteria in TABELAS_SUPABASE.items():
+        url = f"{SUPABASE_URL}/{tabela}"
+        params = {
+            "select": "*",
+            "data": f"eq.{hoje}",
+            "order": "data.desc,horario.desc",
+        }
+
+        try:
+            resp = requests.get(url, headers=headers, params=params, timeout=30)
+            resp.raise_for_status()
+            dados = resp.json()
+        except Exception as e:
+            logging.exception(f"Erro ao buscar {tabela}: {e}")
+            continue
+
+        for item in dados:
+            data_iso = str(item.get("data", hoje))
+            data_br = datetime.strptime(data_iso[:10], "%Y-%m-%d").strftime("%d/%m/%Y")
+
+            horario_raw = str(item.get("horario", "")).strip()
+            horario = re.search(r"\d{1,2}", horario_raw)
+            horario = horario.group(0).zfill(2) if horario else ""
+
+            premios = []
+            for campo in ["m1", "m2", "m3", "m4", "m5"]:
+                valor = item.get(campo) or item.get(campo.upper()) or ""
+                premios.append(str(valor).strip().zfill(4))
+
+            if not horario or len(premios) < 5 or not all(premios):
+                continue
+
+            linha = [
+                data_br,
+                loteria,
+                horario,
+                premios[0],
+                premios[1],
+                premios[2],
+                premios[3],
+                premios[4],
+                "",
+                "",
             ]
-        )
 
-        page = browser.new_page(viewport={"width": 1280, "height": 720})
+            resultados.append({
+                "data": data_br,
+                "loteria": loteria,
+                "horario": horario,
+                "premios": premios,
+                "linha": linha,
+                "origem": tabela,
+            })
 
-        page.goto(
-            "https://bichodata.com/history",
-            wait_until="domcontentloaded",
-            timeout=60000
-        )
-
-        page.wait_for_selector("text=PRÊMIO", timeout=15000)
-
-        html = page.content()
-        browser.close()
-
-        return html
+    return resultados
 
 
 def extrair_cards_resultados(html):
