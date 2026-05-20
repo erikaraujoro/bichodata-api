@@ -199,6 +199,19 @@ from playwright.sync_api import sync_playwright
 
 def buscar_html_bichodata():
 
+    htmls = []
+
+    filtros = [
+        "Rio",
+        "Look",
+        "Fed",
+        "Nac",
+        "SP",
+        "Lotep",
+        "Lotece",
+        "Bahia",
+    ]
+
     with sync_playwright() as p:
 
         browser = p.chromium.launch(
@@ -211,21 +224,31 @@ def buscar_html_bichodata():
             ]
         )
 
-        page = browser.new_page()
-
-        page.goto(
-            "https://bichodata.com",
-            wait_until="networkidle",
-            timeout=120000
+        page = browser.new_page(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
         )
 
+        # Página inicial
+        page.goto("https://bichodata.com", wait_until="networkidle", timeout=120000)
         page.wait_for_timeout(5000)
+        htmls.append(page.content())
 
-        html = page.content()
+        # Página histórico
+        page.goto("https://bichodata.com/history", wait_until="networkidle", timeout=120000)
+        page.wait_for_timeout(5000)
+        htmls.append(page.content())
+
+        for filtro in filtros:
+            try:
+                page.get_by_text(filtro, exact=True).first.click(timeout=5000)
+                page.wait_for_timeout(5000)
+                htmls.append(page.content())
+            except Exception:
+                pass
 
         browser.close()
 
-        return html
+    return "\n".join(htmls)
 
 
 def extrair_cards_resultados(html):
@@ -409,6 +432,9 @@ def interpretar_linhas_card(linhas):
         "premios": premios,
     }
 
+def texto_sheets(valor):
+    valor = str(valor).strip()
+    return "'" + valor
 
 def buscar_resultados_bichodata():
     html = buscar_html_bichodata()
@@ -429,13 +455,13 @@ def buscar_resultados_bichodata():
 
         linha = [
             data,
-            loteria,
-            horario,
-            premios[0],
-            premios[1],
-            premios[2],
-            premios[3],
-            premios[4],
+            texto_sheets(loteria),
+            texto_sheets(str(horario).zfill(2)),
+            texto_sheets(premios[0].zfill(4)),
+            texto_sheets(premios[1].zfill(4)),
+            texto_sheets(premios[2].zfill(4)),
+            texto_sheets(premios[3].zfill(4)),
+            texto_sheets(premios[4].zfill(4)),
             "",
             "",
         ]
@@ -489,7 +515,7 @@ def atualizar_planilha():
         chaves_existentes.add(chave)
 
     if novas_linhas:
-        ws.append_rows(novas_linhas, value_input_option="USER_ENTERED")
+        ws.append_rows(novas_linhas, value_input_option="RAW")
 
     logging.info("Atualização concluída. Inseridos: %s", len(novas_linhas))
 
