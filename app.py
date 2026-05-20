@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 from flask import Flask, jsonify
 from apscheduler.schedulers.background import BackgroundScheduler
 from google.oauth2.service_account import Credentials
+from playwright.sync_api import sync_playwright
 
 
 # =========================
@@ -194,10 +195,32 @@ def titulo_sem_horario(titulo):
 # SCRAPING BICHODATA
 # =========================
 
+from playwright.sync_api import sync_playwright
+
 def buscar_html_bichodata():
-    resp = requests.get(BICHODATA_URL, headers=HEADERS, timeout=30)
-    resp.raise_for_status()
-    return resp.text
+
+    with sync_playwright() as p:
+
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox"]
+        )
+
+        page = browser.new_page()
+
+        page.goto(
+            "https://bichodata.com",
+            wait_until="networkidle",
+            timeout=120000
+        )
+
+        page.wait_for_timeout(5000)
+
+        html = page.content()
+
+        browser.close()
+
+        return html
 
 
 def extrair_cards_resultados(html):
