@@ -521,7 +521,20 @@ def atualizar_manual():
             "erro": str(e)
         }), 500
 
+@app.route("/debug-bichodata")
+def debug_bichodata():
+    html = buscar_html_bichodata()
+    soup = BeautifulSoup(html, "html.parser")
+    texto = soup.get_text("\n", strip=True)
 
+    return jsonify({
+        "tamanho_html": len(html),
+        "tem_premio": "PRÊMIO" in texto.upper(),
+        "tem_milhar": "MILHAR" in texto.upper(),
+        "tem_ptm": "PTM" in texto.upper(),
+        "tem_federal": "FEDERAL" in texto.upper(),
+        "inicio_texto": texto[:3000]
+    })
 # =========================
 # AGENDADOR
 # =========================
