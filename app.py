@@ -554,6 +554,33 @@ def debug_supabase():
         "resultado": saida
     })
 
+@app.route("/debug-lk/<data_teste>")
+def debug_lk(data_teste):
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Accept": "application/json",
+    }
+
+    url = f"{SUPABASE_URL}/resultados_lk"
+
+    saida = {}
+
+    for campo in ["data", "dados"]:
+        params = {
+            "select": "*",
+            campo: f"eq.{data_teste}",
+        }
+
+        resp = requests.get(url, headers=headers, params=params, timeout=30)
+
+        saida[campo] = {
+            "status": resp.status_code,
+            "texto": resp.text[:3000],
+        }
+
+    return jsonify(saida)
+
 
 @app.route("/atualizar")
 def atualizar_manual():
