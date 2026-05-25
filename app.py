@@ -172,6 +172,27 @@ def extrair_premios(item):
 # BUSCA BICHODATA VIA SUPABASE
 # =========================
 
+def calcular_premios_6_7(premios):
+    """
+    M6 = soma de M1 a M5, pegando os 4 últimos dígitos.
+    M7 = M1 * M2, pegando os 3 dígitos após o primeiro dígito do resultado.
+    """
+
+    valores = [int(p) for p in premios[:5]]
+
+    soma = sum(valores)
+    m6 = str(soma)[-4:].zfill(4)
+
+    produto = valores[0] * valores[1]
+    produto_str = str(produto)
+
+    if len(produto_str) >= 4:
+        m7 = produto_str[1:4].zfill(3)
+    else:
+        m7 = produto_str.zfill(4)[1:4].zfill(3)
+
+    return m6, m7
+
 def buscar_resultados_bichodata():
     if not SUPABASE_KEY:
         raise RuntimeError("Variável SUPABASE_KEY não configurada no Render.")
@@ -210,6 +231,8 @@ def buscar_resultados_bichodata():
                 logging.warning("Registro ignorado por dados incompletos em %s: %s", tabela, item)
                 continue
 
+            m6, m7 = calcular_premios_6_7(premios)
+
             linha = [
                 data_br,
                 loteria,
@@ -219,15 +242,15 @@ def buscar_resultados_bichodata():
                 premios[2],
                 premios[3],
                 premios[4],
-                "",
-                "",
+                m6,
+                m7,
             ]
 
             resultados.append({
                 "data": data_br,
                 "loteria": loteria,
                 "horario": horario,
-                "premios": premios,
+                "premios": premios + [m6, m7],
                 "linha": linha,
                 "origem": tabela,
             })
