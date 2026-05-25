@@ -207,16 +207,47 @@ def buscar_resultados_bichodata():
 
     for tabela, loteria in TABELAS_SUPABASE.items():
         url = f"{SUPABASE_URL}/{tabela}"
-        params = {
-            "select": "*",
-            "order": "id.desc",
-            "limit": "60"
-        }
 
         try:
-            resp = requests.get(url, headers=headers, params=params, timeout=30)
-            resp.raise_for_status()
-            dados = resp.json()
+            # Algumas tabelas usam "data"; outras usam "dados"; a Federal usa "data_sorteio".
+            # Por isso fazemos as 3 consultas e juntamos os resultados encontrados.
+            consultas = [
+                {"select": "*", "data": f"eq.{hoje}"},
+                {"select": "*", "dados": f"eq.{hoje}"},
+                {"select": "*", "data_sorteio": f"eq.{hoje}"},
+            ]
+
+            dados = []
+            ids_processados = set()
+
+            for params in consultas:
+                try:
+                    resp = requests.get(url, headers=headers, params=params, timeout=30)
+                    resp.raise_for_status()
+                    encontrados = resp.json()
+
+                    for item_encontrado in encontrados:
+                        chave_item = item_encontrado.get("id")
+
+                        if chave_item is None:
+                            chave_item = json.dumps(item_encontrado, sort_keys=True)
+
+                        if chave_item in ids_processados:
+                            continue
+
+                        ids_processados.add(chave_item)
+                        dados.append(item_encontrado)
+
+                except Exception as erro_consulta:
+                    # Se a coluna não existir em determinada tabela, ignora somente essa consulta
+                    # e tenta a próxima coluna possível.
+                    logging.info(
+                        "Consulta ignorada em %s com params %s: %s",
+                        tabela,
+                        params,
+                        erro_consulta,
+                    )
+
         except Exception as e:
             logging.exception("Erro ao buscar tabela %s: %s", tabela, e)
             continue
@@ -228,11 +259,11 @@ def buscar_resultados_bichodata():
                 or item.get("data_sorteio")
                 or hoje
             )
-            
-            # filtra somente resultados do dia atual
+
+            # Filtra somente resultados do dia atual.
             if str(data_item)[:10] != hoje:
                 continue
-            
+
             data_br = formatar_data_br(data_item)
             horario = formatar_horario(item.get("horario", ""))
             premios = extrair_premios(item)
