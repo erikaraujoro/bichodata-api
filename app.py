@@ -117,13 +117,17 @@ def formatar_milhar(valor):
 
 
 def formatar_horario(valor):
-    texto = normalizar_texto(valor)
+    texto = normalizar_texto(valor).upper()
+
+    texto = texto.replace("H", ":")
+    texto = texto.replace("HS", ":")
+    texto = texto.replace("HORAS", ":")
 
     m = re.search(r"(\d{1,2})\s*:", texto)
     if m:
         return m.group(1).zfill(2)
 
-    m = re.search(r"\b(\d{1,2})\b", texto)
+    m = re.search(r"(\d{1,2})", texto)
     if m:
         return m.group(1).zfill(2)
 
