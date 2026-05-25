@@ -184,12 +184,10 @@ def calcular_premios_6_7(premios):
     m6 = str(soma)[-4:].zfill(4)
 
     produto = valores[0] * valores[1]
-    produto_str = str(produto)
 
-    if len(produto_str) >= 4:
-        m7 = produto_str[1:4].zfill(3)
-    else:
-        m7 = produto_str.zfill(4)[1:4].zfill(3)
+    # Pega a classe de milhar do resultado.
+    # Exemplo: 43.234.755 -> 43234 -> últimos 3 = 234
+    m7 = str(produto // 1000)[-3:].zfill(3)
 
     return m6, m7
 
