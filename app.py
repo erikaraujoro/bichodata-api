@@ -209,7 +209,8 @@ def buscar_resultados_bichodata():
         url = f"{SUPABASE_URL}/{tabela}"
         params = {
             "select": "*",
-            "data": f"eq.{hoje}",
+            "order": "id.desc",
+            "limit": "60"
         }
 
         try:
@@ -221,7 +222,18 @@ def buscar_resultados_bichodata():
             continue
 
         for item in dados:
-            data_br = formatar_data_br(item.get("data", hoje))
+            data_item = (
+                item.get("data")
+                or item.get("dados")
+                or item.get("data_sorteio")
+                or hoje
+            )
+            
+            # filtra somente resultados do dia atual
+            if str(data_item)[:10] != hoje:
+                continue
+            
+            data_br = formatar_data_br(data_item)
             horario = formatar_horario(item.get("horario", ""))
             premios = extrair_premios(item)
 
