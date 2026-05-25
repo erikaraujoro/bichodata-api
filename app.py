@@ -269,7 +269,10 @@ def buscar_resultados_bichodata():
                 continue
 
             data_br = formatar_data_br(data_item)
-            horario = formatar_horario(item.get("horario", ""))
+            if tabela == "resultado_federal":
+                horario = "20"
+            else:
+                horario = formatar_horario(item.get("horario", ""))
             premios = extrair_premios(item)
 
             if not horario or len(premios) < 5 or not all(premios):
@@ -369,7 +372,10 @@ def buscar_resultados_bichodata_data(data_consulta):
                 continue
 
             data_br = formatar_data_br(data_item)
-            horario = formatar_horario(item.get("horario", ""))
+            if tabela == "resultado_federal":
+                horario = "20"
+            else:
+                horario = formatar_horario(item.get("horario", ""))
             premios = extrair_premios(item)
 
             if not horario or len(premios) < 5 or not all(premios):
