@@ -367,7 +367,6 @@ def debug_supabase():
         url = f"{SUPABASE_URL}/{tabela}"
         params = {
             "select": "*",
-            "data": f"eq.{hoje}",
             "limit": "3",
         }
 
