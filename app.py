@@ -303,7 +303,8 @@ def buscar_resultados_bichodata_data(data_consulta):
 
     headers = {
         "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}"
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Accept": "application/json",
     }
 
     resultados = []
@@ -312,54 +313,59 @@ def buscar_resultados_bichodata_data(data_consulta):
 
         url = f"{SUPABASE_URL}/{tabela}"
 
-        params = {
-            "select": "*",
-            "order": "id.desc",
-            "limit": "60"
-        }
+        consultas = [
+            {"select": "*", "data": f"eq.{data_consulta}"},
+            {"select": "*", "dados": f"eq.{data_consulta}"},
+            {"select": "*", "data_sorteio": f"eq.{data_consulta}"},
+        ]
 
-        try:
+        dados = []
+        ids_processados = set()
 
-            resp = requests.get(
-                url,
-                headers=headers,
-                params=params,
-                timeout=30
-            )
+        for params in consultas:
+            try:
+                resp = requests.get(url, headers=headers, params=params, timeout=30)
+                resp.raise_for_status()
 
-            resp.raise_for_status()
+                encontrados = resp.json()
 
-            dados = resp.json()
+                for item in encontrados:
+                    chave_item = item.get("id")
+                    if chave_item is None:
+                        chave_item = json.dumps(item, sort_keys=True)
 
-        except Exception as e:
+                    if chave_item in ids_processados:
+                        continue
 
-            logging.exception(
-                "Erro ao buscar tabela %s: %s",
-                tabela,
-                e
-            )
+                    ids_processados.add(chave_item)
+                    dados.append(item)
 
-            continue
+            except Exception as e:
+                logging.info(
+                    "Consulta ignorada em %s com params %s: %s",
+                    tabela,
+                    params,
+                    e,
+                )
+                continue
 
         for item in dados:
 
-            data_br = formatar_data_br(
+            data_item = (
                 item.get("data")
                 or item.get("dados")
                 or item.get("data_sorteio")
                 or data_consulta
             )
 
-            horario = formatar_horario(
-                item.get("horario", "")
-            )
-
-            premios = extrair_premios(item)
-
-            if not horario or len(premios) < 5:
+            if str(data_item)[:10] != data_consulta:
                 continue
 
-            if data_br != data_consulta:
+            data_br = formatar_data_br(data_item)
+            horario = formatar_horario(item.get("horario", ""))
+            premios = extrair_premios(item)
+
+            if not horario or len(premios) < 5 or not all(premios):
                 continue
 
             m6, m7 = calcular_premios_6_7(premios)
@@ -374,16 +380,19 @@ def buscar_resultados_bichodata_data(data_consulta):
                 premios[3],
                 premios[4],
                 m6,
-                m7
+                m7,
             ]
 
             resultados.append({
                 "data": data_br,
                 "loteria": loteria,
                 "horario": horario,
-                "linha": linha
+                "premios": premios + [m6, m7],
+                "linha": linha,
+                "origem": tabela,
             })
 
+    resultados.sort(key=lambda r: (r["data"], r["loteria"], r["horario"]))
     return resultados
 
 
