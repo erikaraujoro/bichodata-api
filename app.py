@@ -299,6 +299,93 @@ def buscar_resultados_bichodata():
     resultados.sort(key=lambda r: (r["data"], r["loteria"], r["horario"]))
     return resultados
 
+def buscar_resultados_bichodata_data(data_consulta):
+
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}"
+    }
+
+    resultados = []
+
+    for tabela, loteria in TABELAS_SUPABASE.items():
+
+        url = f"{SUPABASE_URL}/{tabela}"
+
+        params = {
+            "select": "*",
+            "order": "id.desc",
+            "limit": "60"
+        }
+
+        try:
+
+            resp = requests.get(
+                url,
+                headers=headers,
+                params=params,
+                timeout=30
+            )
+
+            resp.raise_for_status()
+
+            dados = resp.json()
+
+        except Exception as e:
+
+            logging.exception(
+                "Erro ao buscar tabela %s: %s",
+                tabela,
+                e
+            )
+
+            continue
+
+        for item in dados:
+
+            data_br = formatar_data_br(
+                item.get("data")
+                or item.get("dados")
+                or item.get("data_sorteio")
+                or data_consulta
+            )
+
+            horario = formatar_horario(
+                item.get("horario", "")
+            )
+
+            premios = extrair_premios(item)
+
+            if not horario or len(premios) < 5:
+                continue
+
+            if data_br != data_consulta:
+                continue
+
+            m6, m7 = calcular_premios_6_7(premios)
+
+            linha = [
+                data_br,
+                loteria,
+                horario,
+                premios[0],
+                premios[1],
+                premios[2],
+                premios[3],
+                premios[4],
+                m6,
+                m7
+            ]
+
+            resultados.append({
+                "data": data_br,
+                "loteria": loteria,
+                "horario": horario,
+                "linha": linha
+            })
+
+    return resultados
+
 
 # =========================
 # GRAVAÇÃO
@@ -392,6 +479,34 @@ def preview():
             "ok": False,
             "erro": str(e),
             "traceback": traceback.format_exc(),
+        }), 500
+
+# =====================================================
+# PREVIEW POR DATA (DEBUG)
+# Exemplo:
+# /preview-data/2026-05-24
+# =====================================================
+
+@app.route("/preview-data/<data_teste>")
+def preview_data(data_teste):
+    try:
+
+        resultados = buscar_resultados_bichodata_data(data_teste)
+
+        return jsonify({
+            "ok": True,
+            "data_consulta": data_teste,
+            "total": len(resultados),
+            "resultados": resultados
+        })
+
+    except Exception as e:
+        import traceback
+
+        return jsonify({
+            "ok": False,
+            "erro": str(e),
+            "traceback": traceback.format_exc()
         }), 500
 
 @app.route("/debug-supabase")
