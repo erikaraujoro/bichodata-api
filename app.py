@@ -331,8 +331,11 @@ def buscar_resultados_bichodata_data(data_consulta):
 
                 for item in encontrados:
                     chave_item = item.get("id")
+
                     if chave_item is None:
                         chave_item = json.dumps(item, sort_keys=True)
+                    else:
+                        chave_item = f"{tabela}|{chave_item}"
 
                     if chave_item in ids_processados:
                         continue
@@ -358,7 +361,7 @@ def buscar_resultados_bichodata_data(data_consulta):
                 or data_consulta
             )
 
-            if str(data_item)[:10] != data_consulta:
+            if str(data_item).strip()[:10] != data_consulta:
                 continue
 
             data_br = formatar_data_br(data_item)
