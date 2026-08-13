@@ -472,6 +472,35 @@ def buscar_resultados_jbcerto(
                 titulo,
                 loteria,
             )
+            
+            # -------------------------------------------------
+            # IGNORA FEDERAL REPLICADA EM PÁGINAS DE OUTRAS
+            # LOTERIAS
+            # -------------------------------------------------
+            #
+            # O JB Certo também publica o resultado da Federal
+            # dentro de páginas como PT-RIO e PT-SP.
+            #
+            # Exemplo:
+            # "LT PT RIO – Federal 20 horas"
+            # "PT SP – Federal 20 horas"
+            #
+            # A Federal será coletada exclusivamente pela página
+            # própria configurada como FEDERAL.
+            # -------------------------------------------------
+
+            titulo_lower = titulo.lower()
+
+            if (
+                loteria != "FEDERAL"
+                and "federal" in titulo_lower
+            ):
+                logging.info(
+                    "Federal replicada ignorada: %s | %s",
+                    loteria,
+                    titulo,
+                )
+                continue
 
             if not data_br:
                 logging.warning(
