@@ -32,7 +32,7 @@ TABELAS_SUPABASE = {
     "resultado_nacional": "NACIONAL",
     "resultados_lk": "LOOK-GO",
     "resultados_sp": "PT-SP",
-    "resultados_bahia": "BAHIA",
+    "resultados_bahia": "PT-BA",
     "resultados_lotep_pb": "LOTEP",
     "resultados_lotece_ce": "LOTECE",
     "resultado_federal": "FEDERAL",
