@@ -246,35 +246,86 @@ def extrair_horario_jbcerto(titulo, loteria):
 
 def obter_titulo_anterior_tabela_jbcerto(tabela):
     """
-    Procura o título correspondente à tabela de resultados.
-    """
-    titulo_tag = tabela.find_previous(
-        ["h2", "h3", "h4", "h5"]
-    )
+    Procura o identificador do sorteio imediatamente antes da tabela.
 
-    if titulo_tag:
-        return normalizar_texto(
-            titulo_tag.get_text(" ", strip=True)
-        )
+    Exemplos encontrados no JB Certo:
+    LT PT RIO – 16 horas PTV
+    LT LOOK – 18h20
+    LT NACIONAL – 17 horas
+    PT SP – 19h20
+    Federal 20 horas
+    """
+
+    elemento = tabela.find_previous()
+
+    limite = 0
+
+    while elemento is not None and limite < 40:
+        limite += 1
+
+        try:
+            texto = normalizar_texto(
+                elemento.get_text(" ", strip=True)
+            )
+        except Exception:
+            elemento = elemento.find_previous()
+            continue
+
+        if texto:
+            texto_lower = texto.lower()
+
+            tem_horario = re.search(
+                r"\b\d{1,2}\s*(?:h\d{0,2}|horas?)\b",
+                texto_lower
+            )
+
+            if tem_horario:
+                if (
+                    "lt pt rio" in texto_lower
+                    or "lt look" in texto_lower
+                    or "lt nacional" in texto_lower
+                    or "pt sp" in texto_lower
+                    or "federal" in texto_lower
+                    or "lotece" in texto_lower
+                    or "lotep" in texto_lower
+                    or "bahia" in texto_lower
+                ):
+                    return texto
+
+        elemento = elemento.find_previous()
 
     return ""
 
 
 def obter_data_anterior_tabela_jbcerto(tabela):
     """
-    Procura a data imediatamente anterior à tabela.
+    Procura a data DD/MM/AAAA imediatamente anterior à tabela.
     """
 
-    regex_data = re.compile(
-        r"\b\d{2}/\d{2}/\d{4}\b"
-    )
+    elemento = tabela.find_previous()
 
-    texto_data = tabela.find_previous(
-        string=regex_data
-    )
+    limite = 0
 
-    if texto_data:
-        return extrair_data_jbcerto(texto_data)
+    while elemento is not None and limite < 30:
+        limite += 1
+
+        try:
+            texto = normalizar_texto(
+                elemento.get_text(" ", strip=True)
+            )
+        except Exception:
+            elemento = elemento.find_previous()
+            continue
+
+        match = re.search(
+            r"\b(\d{2}/\d{2}/\d{4})\b",
+            texto
+        )
+
+        if match:
+            return match.group(1)
+
+        elemento = elemento.find_previous()
 
     return ""
 
