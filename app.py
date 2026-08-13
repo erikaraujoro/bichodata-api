@@ -237,10 +237,9 @@ def extrair_horario_jbcerto(titulo, loteria):
     if match:
         return match.group(1).zfill(2)
 
-    # Segurança adicional para a Federal
-    if loteria == "FEDERAL":
-        return "20"
-
+    # Se o horário não estiver claramente identificado
+    # no título do sorteio, o resultado é ignorado.
+    # Não utiliza horário fixo para nenhuma loteria.
     return ""
 
 
@@ -837,52 +836,128 @@ def buscar_resultados_bichodata_data(data_consulta):
 # =========================
 
 def atualizar_planilha():
-    logging.info("Iniciando atualização do BichoData...")
+    logging.info(
+        "Iniciando atualização pelo Resultados JB Certo..."
+    )
 
-    resultados = buscar_resultados_bichodata()
+    # Relê alguns dias anteriores para recuperar
+    # sorteios que eventualmente tenham sido publicados
+    # com atraso no site de origem.
+    resultados = buscar_resultados_jbcerto(
+        dias_retroativos=3
+    )
 
     if not resultados:
-        logging.warning("Nenhum resultado encontrado no BichoData.")
+        logging.warning(
+            "Nenhum resultado encontrado no JB Certo."
+        )
+
         return {
             "ok": False,
-            "mensagem": "Nenhum resultado encontrado no BichoData.",
+            "mensagem": (
+                "Nenhum resultado encontrado no JB Certo."
+            ),
+            "fonte": "JB_CERTO",
             "inseridos": 0,
             "resultados_lidos": 0,
+            "ignorados_por_duplicidade": 0,
         }
 
     ws = conectar_planilha()
-    garantir_cabecalho(ws)
 
-    chaves_existentes = carregar_chaves_existentes(ws)
+    garantir_cabecalho(
+        ws
+    )
+
+    chaves_existentes = (
+        carregar_chaves_existentes(
+            ws
+        )
+    )
 
     novas_linhas = []
     ignorados = []
 
-    for r in resultados:
-        chave = f"{r['data']}|{r['loteria']}|{str(r['horario']).zfill(2)}"
+    for resultado in resultados:
+
+        data = resultado["data"]
+
+        loteria = resultado["loteria"]
+
+        horario = str(
+            resultado["horario"]
+        ).zfill(2)
+
+        chave = (
+            f"{data}|"
+            f"{loteria}|"
+            f"{horario}"
+        )
 
         if chave in chaves_existentes:
-            ignorados.append(chave)
+
+            ignorados.append(
+                chave
+            )
+
             continue
 
-        novas_linhas.append(r["linha"])
-        chaves_existentes.add(chave)
+        novas_linhas.append(
+            resultado["linha"]
+        )
+
+        chaves_existentes.add(
+            chave
+        )
 
     if novas_linhas:
-        # RAW mantém horário 09 e milhares 0304/0450/0738 como texto com zeros à esquerda.
-        ws.append_rows(novas_linhas, value_input_option="RAW")
 
-    logging.info("Atualização concluída. Inseridos: %s", len(novas_linhas))
+        # RAW preserva:
+        #
+        # horário 09
+        # milhares 0036
+        # milhares 0304
+        # M7 045
+        #
+        # sem conversões automáticas do Google Sheets.
+        ws.append_rows(
+            novas_linhas,
+            value_input_option="RAW",
+        )
+
+    logging.info(
+        (
+            "Atualização JB Certo concluída. "
+            "Lidos: %s | "
+            "Inseridos: %s | "
+            "Duplicados ignorados: %s"
+        ),
+        len(resultados),
+        len(novas_linhas),
+        len(ignorados),
+    )
 
     return {
         "ok": True,
-        "mensagem": "Atualização concluída.",
-        "resultados_lidos": len(resultados),
-        "inseridos": len(novas_linhas),
-        "ignorados_por_duplicidade": len(ignorados),
-        "executado_em": datetime.now(TIMEZONE).strftime("%d/%m/%Y %H:%M:%S"),
+        "fonte": "JB_CERTO",
+        "mensagem": (
+            "Atualização JB Certo concluída."
+        ),
+        "resultados_lidos": len(
+            resultados
+        ),
+        "inseridos": len(
+            novas_linhas
+        ),
+        "ignorados_por_duplicidade": len(
+            ignorados
+        ),
+        "executado_em": datetime.now(
+            TIMEZONE
+        ).strftime(
+            "%d/%m/%Y %H:%M:%S"
+        ),
     }
-
 
 # =========================
 # ROTAS API
@@ -892,11 +967,24 @@ def atualizar_planilha():
 def home():
     return jsonify({
         "status": "online",
-        "servico": "API BichoData para Google Sheets",
+        "servico": (
+            "API JB Certo para Google Sheets"
+        ),
+        "fonte_principal": (
+            "Resultados JB Certo"
+        ),
         "rotas": {
-            "/atualizar": "Busca resultados agora e grava na planilha",
-            "/preview": "Mostra os resultados encontrados sem gravar",
-            "/health": "Verifica se a API está online",
+            "/atualizar": (
+                "Busca resultados no JB Certo "
+                "e grava na planilha"
+            ),
+            "/preview": (
+                "Mostra os resultados do JB Certo "
+                "sem gravar"
+            ),
+            "/health": (
+                "Verifica se a API está online"
+            ),
         },
     })
 
@@ -912,14 +1000,43 @@ def health():
 @app.route("/preview")
 def preview():
     try:
-        resultados = buscar_resultados_bichodata()
+
+        resultados = buscar_resultados_jbcerto(
+            dias_retroativos=3
+        )
+
+        resumo_loterias = {}
+
+        for resultado in resultados:
+
+            loteria = resultado[
+                "loteria"
+            ]
+
+            resumo_loterias[
+                loteria
+            ] = (
+                resumo_loterias.get(
+                    loteria,
+                    0
+                )
+                + 1
+            )
+
         return jsonify({
             "ok": True,
-            "total": len(resultados),
+            "fonte": "Resultados JB Certo",
+            "total": len(
+                resultados
+            ),
+            "por_loteria": resumo_loterias,
             "resultados": resultados,
         })
+
     except Exception as e:
+
         import traceback
+
         return jsonify({
             "ok": False,
             "erro": str(e),
