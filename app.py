@@ -53,6 +53,32 @@ URLS_JBCERTO = {
     "BAHIA": "https://resultadosjbcerto.com.br/bahia/",
 }
 
+# =========================
+# HORÁRIOS OFICIAIS NO LOTERIASDB
+# =========================
+
+HORARIOS_VALIDOS_JBCERTO = {
+    "LOTEP": {
+        "09",
+        "10",
+        "12",
+        "15",
+        "18",
+        "20",
+    },
+
+    "PT-SP": {
+        "08",
+        "10",
+        "12",
+        "13",
+        "15",
+        "17",
+        "19",
+        "20",
+    },
+}
+
 HEADERS_JBCERTO = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -241,6 +267,98 @@ def extrair_horario_jbcerto(titulo, loteria):
     # no título do sorteio, o resultado é ignorado.
     # Não utiliza horário fixo para nenhuma loteria.
     return ""
+
+def normalizar_resultado_jbcerto(
+    loteria,
+    horario,
+    titulo
+):
+    """
+    Normaliza os agrupamentos utilizados no LoteriasDB.
+
+    PARAÍBA
+    --------
+    PARATODOS PB 09:45 -> LOTEP | 09
+    LOTEP 10:45        -> LOTEP | 10
+    LOTEP 12:45        -> LOTEP | 12
+    LOTEP 15:45        -> LOTEP | 15
+    LOTEP 18h          -> LOTEP | 18
+    PARATODOS PB 20h   -> LOTEP | 20
+
+    SÃO PAULO
+    ----------
+    Bandeirantes 15:30 -> PT-SP | 15
+    demais PT-SP       -> PT-SP | horário original
+    """
+
+    loteria = str(
+        loteria
+    ).strip().upper()
+
+    horario = str(
+        horario
+    ).strip().zfill(2)
+
+    titulo_lower = normalizar_texto(
+        titulo
+    ).lower()
+
+    # =====================================================
+    # PARAÍBA / LOTEP
+    # =====================================================
+
+    if loteria == "LOTEP":
+
+        # O JB Certo pode identificar esses horários como
+        # Paraíba PARATODOS, mas dentro do LoteriasDB todo
+        # o conjunto permanece agrupado como LOTEP.
+        if (
+            "paratodos" in titulo_lower
+            or "para todos" in titulo_lower
+        ):
+            if horario in {
+                "09",
+                "20",
+            }:
+                return (
+                    "LOTEP",
+                    horario,
+                )
+
+        return (
+            "LOTEP",
+            horario,
+        )
+
+    # =====================================================
+    # SÃO PAULO / BANDEIRANTES
+    # =====================================================
+
+    if loteria == "PT-SP":
+
+        # Bandeirantes 15:30 faz parte do agrupamento
+        # PT-SP no LoteriasDB.
+        if (
+            "bandeirantes"
+            in titulo_lower
+            or "bandeirante"
+            in titulo_lower
+        ):
+            if horario == "15":
+                return (
+                    "PT-SP",
+                    "15",
+                )
+
+        return (
+            "PT-SP",
+            horario,
+        )
+
+    return (
+        loteria,
+        horario,
+    )
 
 
 def obter_titulo_anterior_tabela_jbcerto(tabela):
@@ -471,7 +589,27 @@ def buscar_resultados_jbcerto(
                 titulo,
                 loteria,
             )
-            
+
+            # =================================================
+            # NORMALIZA AGRUPAMENTOS DO LOTERIASDB
+            # =================================================
+
+            if horario:
+
+                (
+                    loteria_normalizada,
+                    horario_normalizado,
+                ) = normalizar_resultado_jbcerto(
+                    loteria,
+                    horario,
+                    titulo,
+                )
+
+            else:
+
+                loteria_normalizada = loteria
+                horario_normalizado = horario
+
             # -------------------------------------------------
             # IGNORA FEDERAL REPLICADA EM PÁGINAS DE OUTRAS
             # LOTERIAS
@@ -509,12 +647,47 @@ def buscar_resultados_jbcerto(
                 )
                 continue
 
-            if not horario:
+            if not horario_normalizado:
                 logging.warning(
                     "Tabela JB Certo ignorada sem horário: %s | %s",
                     loteria,
                     titulo,
                 )
+                continue
+            
+            loteria_resultado = (
+                loteria_normalizada
+            )
+
+            horario_resultado = (
+                horario_normalizado
+            )
+            
+            # =================================================
+            # HORÁRIOS CONTROLADOS
+            # =================================================
+
+            horarios_validos = (
+                HORARIOS_VALIDOS_JBCERTO.get(
+                    loteria_resultado
+                )
+            )
+
+            if (
+                horarios_validos
+                and horario_resultado
+                not in horarios_validos
+            ):
+                logging.warning(
+                    (
+                        "Horário inesperado ignorado: "
+                        "%s | %s | %s"
+                    ),
+                    loteria_resultado,
+                    horario_resultado,
+                    titulo,
+                )
+
                 continue
 
             try:
@@ -542,8 +715,8 @@ def buscar_resultados_jbcerto(
 
             chave = (
                 f"{data_br}|"
-                f"{loteria}|"
-                f"{horario}"
+                f"{loteria_resultado}|"
+                f"{horario_resultado}"
             )
 
             if chave in chaves_processadas:
@@ -553,8 +726,8 @@ def buscar_resultados_jbcerto(
 
             linha = [
                 data_br,
-                loteria,
-                horario,
+                loteria_resultado,
+                horario_resultado,
                 premios[0],
                 premios[1],
                 premios[2],
@@ -566,8 +739,8 @@ def buscar_resultados_jbcerto(
 
             resultados.append({
                 "data": data_br,
-                "loteria": loteria,
-                "horario": horario,
+                "loteria": loteria_resultado,
+                "horario": horario_resultado,
                 "premios": premios + [m6, m7],
                 "linha": linha,
                 "origem": "JB_CERTO",
