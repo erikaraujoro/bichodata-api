@@ -2,11 +2,12 @@ import os
 import re
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import requests
 import gspread
+from bs4 import BeautifulSoup
 from flask import Flask, jsonify
 from apscheduler.schedulers.background import BackgroundScheduler
 from google.oauth2.service_account import Credentials
@@ -35,6 +36,30 @@ TABELAS_SUPABASE = {
     "resultados_lotep_pb": "LOTEP",
     "resultados_lotece_ce": "LOTECE",
     "resultado_federal": "FEDERAL",
+}
+
+# =========================
+# RESULTADOS JB CERTO
+# =========================
+
+URLS_JBCERTO = {
+    "PT-RJ": "https://resultadosjbcerto.com.br/pt-rio/",
+    "LOOK-GO": "https://resultadosjbcerto.com.br/look/",
+    "NACIONAL": "https://resultadosjbcerto.com.br/nacional/",
+    "PT-SP": "https://resultadosjbcerto.com.br/pt-sp/",
+    "FEDERAL": "https://resultadosjbcerto.com.br/federal/",
+    "LOTEP": "https://resultadosjbcerto.com.br/lotep/",
+    "LOTECE": "https://resultadosjbcerto.com.br/lotece/",
+    "BAHIA": "https://resultadosjbcerto.com.br/bahia/",
+}
+
+HEADERS_JBCERTO = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/142.0 Safari/537.36"
+    ),
+    "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
 }
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -170,6 +195,324 @@ def extrair_premios(item):
         premios.append(formatar_milhar(valor))
 
     return premios
+
+# =========================
+# BUSCA RESULTADOS JB CERTO
+# =========================
+
+def extrair_data_jbcerto(texto):
+    """
+    Procura uma data no formato DD/MM/AAAA.
+    """
+    texto = normalizar_texto(texto)
+
+    match = re.search(
+        r"\b(\d{2}/\d{2}/\d{4})\b",
+        texto
+    )
+
+    if not match:
+        return ""
+
+    return match.group(1)
+
+
+def extrair_horario_jbcerto(titulo, loteria):
+    """
+    Extrai somente a hora da identificação do sorteio.
+
+    Exemplos:
+    18h20 -> 18
+    9h20 -> 09
+    11 horas -> 11
+    Federal 20 horas -> 20
+    """
+    titulo = normalizar_texto(titulo).lower()
+
+    match = re.search(
+        r"\b(\d{1,2})\s*(?:h|horas?)",
+        titulo
+    )
+
+    if match:
+        return match.group(1).zfill(2)
+
+    # Segurança adicional para a Federal
+    if loteria == "FEDERAL":
+        return "20"
+
+    return ""
+
+
+def obter_titulo_anterior_tabela_jbcerto(tabela):
+    """
+    Procura o título correspondente à tabela de resultados.
+    """
+    titulo_tag = tabela.find_previous(
+        ["h2", "h3", "h4", "h5"]
+    )
+
+    if titulo_tag:
+        return normalizar_texto(
+            titulo_tag.get_text(" ", strip=True)
+        )
+
+    return ""
+
+
+def obter_data_anterior_tabela_jbcerto(tabela):
+    """
+    Procura a data imediatamente anterior à tabela.
+    """
+
+    regex_data = re.compile(
+        r"\b\d{2}/\d{2}/\d{4}\b"
+    )
+
+    texto_data = tabela.find_previous(
+        string=regex_data
+    )
+
+    if texto_data:
+        return extrair_data_jbcerto(texto_data)
+
+    return ""
+
+
+def extrair_milhares_tabela_jbcerto(tabela):
+    """
+    Lê a tabela do JB Certo e retorna M1 até M5.
+    """
+
+    premios = {}
+
+    linhas = tabela.find_all("tr")
+
+    for linha in linhas:
+        colunas = linha.find_all(["td", "th"])
+
+        if len(colunas) < 2:
+            continue
+
+        premio_txt = normalizar_texto(
+            colunas[0].get_text(" ", strip=True)
+        )
+
+        milhar_txt = normalizar_texto(
+            colunas[1].get_text(" ", strip=True)
+        )
+
+        match_premio = re.search(
+            r"([1-5])",
+            premio_txt
+        )
+
+        if not match_premio:
+            continue
+
+        numero_premio = int(
+            match_premio.group(1)
+        )
+
+        milhar = formatar_milhar(
+            milhar_txt
+        )
+
+        if not milhar:
+            continue
+
+        premios[numero_premio] = milhar
+
+    if not all(
+        numero in premios
+        for numero in range(1, 6)
+    ):
+        return []
+
+    return [
+        premios[1],
+        premios[2],
+        premios[3],
+        premios[4],
+        premios[5],
+    ]
+
+
+def buscar_resultados_jbcerto(
+    dias_retroativos=3
+):
+    """
+    Busca resultados diretamente no site Resultados JB Certo.
+
+    A leitura é feita para todas as loterias configuradas em
+    URLS_JBCERTO.
+
+    São considerados resultados de hoje e também resultados recentes,
+    permitindo recuperar sorteios que tenham sido publicados com atraso.
+    """
+
+    hoje = datetime.now(
+        TIMEZONE_DADOS
+    ).date()
+
+    data_minima = hoje - timedelta(
+        days=max(0, int(dias_retroativos))
+    )
+
+    resultados = []
+    chaves_processadas = set()
+
+    for loteria, url in URLS_JBCERTO.items():
+
+        logging.info(
+            "Buscando JB Certo: %s - %s",
+            loteria,
+            url,
+        )
+
+        try:
+            resposta = requests.get(
+                url,
+                headers=HEADERS_JBCERTO,
+                timeout=30,
+            )
+
+            resposta.raise_for_status()
+
+        except Exception as e:
+            logging.exception(
+                "Erro ao acessar JB Certo para %s: %s",
+                loteria,
+                e,
+            )
+            continue
+
+        soup = BeautifulSoup(
+            resposta.text,
+            "html.parser"
+        )
+
+        tabelas = soup.find_all("table")
+
+        logging.info(
+            "JB Certo %s: %s tabela(s) encontrada(s).",
+            loteria,
+            len(tabelas),
+        )
+
+        for tabela in tabelas:
+
+            premios = extrair_milhares_tabela_jbcerto(
+                tabela
+            )
+
+            if len(premios) != 5:
+                continue
+
+            titulo = obter_titulo_anterior_tabela_jbcerto(
+                tabela
+            )
+
+            data_br = obter_data_anterior_tabela_jbcerto(
+                tabela
+            )
+
+            horario = extrair_horario_jbcerto(
+                titulo,
+                loteria,
+            )
+
+            if not data_br:
+                logging.warning(
+                    "Tabela JB Certo ignorada sem data: %s | %s",
+                    loteria,
+                    titulo,
+                )
+                continue
+
+            if not horario:
+                logging.warning(
+                    "Tabela JB Certo ignorada sem horário: %s | %s",
+                    loteria,
+                    titulo,
+                )
+                continue
+
+            try:
+                data_obj = datetime.strptime(
+                    data_br,
+                    "%d/%m/%Y"
+                ).date()
+
+            except ValueError:
+                logging.warning(
+                    "Data inválida no JB Certo: %s",
+                    data_br,
+                )
+                continue
+
+            if data_obj < data_minima:
+                continue
+
+            if data_obj > hoje:
+                continue
+
+            m6, m7 = calcular_premios_6_7(
+                premios
+            )
+
+            chave = (
+                f"{data_br}|"
+                f"{loteria}|"
+                f"{horario}"
+            )
+
+            if chave in chaves_processadas:
+                continue
+
+            chaves_processadas.add(chave)
+
+            linha = [
+                data_br,
+                loteria,
+                horario,
+                premios[0],
+                premios[1],
+                premios[2],
+                premios[3],
+                premios[4],
+                m6,
+                m7,
+            ]
+
+            resultados.append({
+                "data": data_br,
+                "loteria": loteria,
+                "horario": horario,
+                "premios": premios + [m6, m7],
+                "linha": linha,
+                "origem": "JB_CERTO",
+                "titulo_original": titulo,
+                "url_origem": url,
+            })
+
+    resultados.sort(
+        key=lambda r: (
+            datetime.strptime(
+                r["data"],
+                "%d/%m/%Y"
+            ),
+            r["loteria"],
+            r["horario"],
+        )
+    )
+
+    logging.info(
+        "JB Certo: total de %s resultado(s) válido(s).",
+        len(resultados),
+    )
+
+    return resultados
 
 
 # =========================
@@ -497,6 +840,47 @@ def preview():
         })
     except Exception as e:
         import traceback
+        return jsonify({
+            "ok": False,
+            "erro": str(e),
+            "traceback": traceback.format_exc(),
+        }), 500
+        
+# =====================================================
+# PREVIEW RESULTADOS JB CERTO
+# Não grava nada na planilha.
+# =====================================================
+
+@app.route("/preview-jbcerto")
+def preview_jbcerto():
+    try:
+        resultados = buscar_resultados_jbcerto(
+            dias_retroativos=3
+        )
+
+        resumo_loterias = {}
+
+        for resultado in resultados:
+            loteria = resultado["loteria"]
+
+            resumo_loterias[loteria] = (
+                resumo_loterias.get(
+                    loteria,
+                    0
+                ) + 1
+            )
+
+        return jsonify({
+            "ok": True,
+            "fonte": "Resultados JB Certo",
+            "total": len(resultados),
+            "por_loteria": resumo_loterias,
+            "resultados": resultados,
+        })
+
+    except Exception as e:
+        import traceback
+
         return jsonify({
             "ok": False,
             "erro": str(e),
