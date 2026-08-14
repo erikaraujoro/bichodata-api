@@ -113,6 +113,79 @@ HEADERS_RESULTADO_FACIL = {
     "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
 }
 
+
+# =========================
+# RESULTADO FÁCIL - NOVAS LOTERIAS
+# =========================
+
+NOVAS_LOTERIAS_RESULTADO_FACIL = {
+    "AVAL-PE": {
+        "url_base": (
+            "https://www.resultadofacil.com.br/"
+            "resultados-aval-pernambuco-do-dia-"
+        ),
+
+        # O Resultado Fácil identifica:
+        # 12:45 como 13:00
+        # 15:45 como 16:00
+        "horarios_origem": {
+            "09",
+            "11",
+            "13",
+            "14",
+            "16",
+            "17",
+            "19",
+        },
+
+        "normalizacao_horarios": {
+            "13": "12",
+            "16": "15",
+        },
+    },
+
+    "CAMINHO-DA-SORTE": {
+        "url_base": (
+            "https://www.resultadofacil.com.br/"
+            "resultados-caminho-da-sorte-do-dia-"
+        ),
+
+        "horarios_origem": {
+            "09",
+            "11",
+            "12",
+            "14",
+            "15",
+            "17",
+            "18",
+            "20",
+            "21",
+        },
+
+        # No LoteriasDB o resultado publicado às 20h
+        # é tratado como resultado das 19h.
+        "normalizacao_horarios": {
+            "20": "19",
+        },
+    },
+
+    "MINAS-MG": {
+        "url_base": (
+            "https://www.resultadofacil.com.br/"
+            "resultados-minas-mg-do-dia-"
+        ),
+
+        "horarios_origem": {
+            "12",
+            "15",
+            "19",
+            "21",
+        },
+
+        "normalizacao_horarios": {},
+    },
+}
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 app = Flask(__name__)
@@ -683,40 +756,342 @@ def buscar_resultados_resultadofacil_lotep(
     return resultados
 
 
-def combinar_resultados_fontes(
-    resultados_jb,
-    resultados_complementares
+
+def buscar_resultados_resultadofacil_novas_loterias(
+    dias_retroativos=3
 ):
     """
-    JB Certo tem prioridade.
+    Busca as novas loterias diretamente no Resultado Fácil.
 
-    O Resultado Fácil só preenche uma chave
-    Data + Loteria + Horário que ainda não exista.
+    A cada execução consulta:
+    hoje + os 3 dias anteriores.
+
+    Regras:
+    - AVAL-PE:
+        origem 13 -> grava 12
+        origem 16 -> grava 15
+
+    - CAMINHO-DA-SORTE:
+        origem 20 -> grava 19
+
+    - MINAS-MG:
+        12, 15, 19 e 21
+        se 19h não existir em dia de Federal,
+        simplesmente não grava esse horário.
+
+    Qualquer bloco Federal encontrado nas páginas
+    é sempre ignorado.
+    """
+
+    hoje = datetime.now(
+        TIMEZONE_DADOS
+    ).date()
+
+    data_minima = hoje - timedelta(
+        days=max(
+            0,
+            int(
+                dias_retroativos
+            )
+        )
+    )
+
+    resultados = []
+
+    data_atual = data_minima
+
+    while data_atual <= hoje:
+        data_iso = data_atual.strftime(
+            "%Y-%m-%d"
+        )
+
+        data_br = data_atual.strftime(
+            "%d/%m/%Y"
+        )
+
+        for (
+            loteria,
+            configuracao,
+        ) in NOVAS_LOTERIAS_RESULTADO_FACIL.items():
+
+            url = (
+                configuracao[
+                    "url_base"
+                ]
+                + data_iso
+            )
+
+            try:
+                resp = requests.get(
+                    url,
+                    headers=HEADERS_RESULTADO_FACIL,
+                    timeout=30,
+                )
+
+                if resp.status_code == 404:
+                    continue
+
+                resp.raise_for_status()
+
+            except Exception as e:
+                logging.exception(
+                    (
+                        "Erro Resultado Fácil "
+                        "%s | %s: %s"
+                    ),
+                    loteria,
+                    url,
+                    e,
+                )
+                continue
+
+            variaveis = (
+                extrair_dataset_resultadofacil(
+                    resp.text
+                )
+            )
+
+            sorteios = {}
+
+            horarios_origem = (
+                configuracao[
+                    "horarios_origem"
+                ]
+            )
+
+            normalizacao = (
+                configuracao[
+                    "normalizacao_horarios"
+                ]
+            )
+
+            for item in variaveis:
+                if not isinstance(
+                    item,
+                    dict
+                ):
+                    continue
+
+                nome = obter_campo_dataset(
+                    item,
+                    [
+                        "name",
+                        "nome",
+                    ]
+                )
+
+                valor = obter_campo_dataset(
+                    item,
+                    [
+                        "value",
+                        "valor",
+                    ]
+                )
+
+                if not nome or not valor:
+                    continue
+
+                nome_upper = normalizar_texto(
+                    nome
+                ).upper()
+
+                # Federal pode aparecer misturada
+                # nessas páginas e nunca deve ser gravada.
+                if "FEDERAL" in nome_upper:
+                    continue
+
+                horario_origem = (
+                    extrair_horario_dataset(
+                        nome
+                    )
+                )
+
+                if (
+                    horario_origem
+                    not in horarios_origem
+                ):
+                    continue
+
+                horario_destino = (
+                    normalizacao.get(
+                        horario_origem,
+                        horario_origem,
+                    )
+                )
+
+                posicao = (
+                    extrair_posicao_dataset(
+                        nome
+                    )
+                )
+
+                if posicao is None:
+                    continue
+
+                milhar = (
+                    extrair_milhar_dataset(
+                        valor
+                    )
+                )
+
+                if not milhar:
+                    continue
+
+                sorteios.setdefault(
+                    horario_destino,
+                    {}
+                )
+
+                sorteios[
+                    horario_destino
+                ][
+                    posicao
+                ] = milhar
+
+            for horario in sorted(
+                sorteios.keys()
+            ):
+                premios_dict = sorteios[
+                    horario
+                ]
+
+                if not all(
+                    p in premios_dict
+                    for p in range(
+                        1,
+                        6
+                    )
+                ):
+                    continue
+
+                premios = [
+                    premios_dict[1],
+                    premios_dict[2],
+                    premios_dict[3],
+                    premios_dict[4],
+                    premios_dict[5],
+                ]
+
+                m6, m7 = calcular_premios_6_7(
+                    premios
+                )
+
+                linha = [
+                    data_br,
+                    loteria,
+                    horario,
+                    premios[0],
+                    premios[1],
+                    premios[2],
+                    premios[3],
+                    premios[4],
+                    m6,
+                    m7,
+                ]
+
+                resultados.append({
+                    "data": data_br,
+                    "loteria": loteria,
+                    "horario": horario,
+                    "premios": (
+                        premios
+                        + [
+                            m6,
+                            m7,
+                        ]
+                    ),
+                    "linha": linha,
+                    "origem": "RESULTADO_FACIL",
+                    "titulo_original": (
+                        "Resultado Fácil"
+                    ),
+                    "url_origem": url,
+                })
+
+        data_atual += timedelta(
+            days=1
+        )
+
+    resultados.sort(
+        key=lambda r: (
+            datetime.strptime(
+                r["data"],
+                "%d/%m/%Y"
+            ),
+            r["loteria"],
+            r["horario"],
+        )
+    )
+
+    resumo = {}
+
+    for resultado in resultados:
+        loteria = resultado[
+            "loteria"
+        ]
+
+        resumo[
+            loteria
+        ] = (
+            resumo.get(
+                loteria,
+                0
+            )
+            + 1
+        )
+
+    logging.info(
+        (
+            "Resultado Fácil novas loterias: "
+            "%s resultado(s) | %s"
+        ),
+        len(
+            resultados
+        ),
+        resumo,
+    )
+
+    return resultados
+
+
+def combinar_resultados_fontes(
+    *fontes_resultados
+):
+    """
+    Combina múltiplas fontes usando a chave:
+
+        Data + Loteria + Horário
+
+    A fonte passada primeiro tem prioridade caso a
+    mesma chave apareça novamente em outra fonte.
+
+    Ordem usada na automação:
+    1) JB Certo
+    2) Complemento LOTEP Resultado Fácil
+    3) Novas loterias Resultado Fácil
     """
 
     combinados = []
     chaves = set()
 
-    for resultado in (
-        resultados_jb
-        + resultados_complementares
-    ):
-        chave = (
-            f"{resultado['data']}|"
-            f"{resultado['loteria']}|"
-            f"{str(resultado['horario']).zfill(2)}"
-        )
+    for fonte in fontes_resultados:
+        for resultado in fonte:
+            chave = (
+                f"{resultado['data']}|"
+                f"{resultado['loteria']}|"
+                f"{str(resultado['horario']).zfill(2)}"
+            )
 
-        if chave in chaves:
-            continue
+            if chave in chaves:
+                continue
 
-        chaves.add(
-            chave
-        )
+            chaves.add(
+                chave
+            )
 
-        combinados.append(
-            resultado
-        )
+            combinados.append(
+                resultado
+            )
 
     combinados.sort(
         key=lambda r: (
@@ -1520,7 +1895,7 @@ def buscar_resultados_bichodata_data(data_consulta):
 
 def atualizar_planilha():
     logging.info(
-        "Iniciando atualização JB Certo + complemento LOTEP Resultado Fácil..."
+        "Iniciando atualização JB Certo + Resultado Fácil (LOTEP + novas loterias)..."
     )
 
     # Relê alguns dias anteriores para recuperar
@@ -1536,9 +1911,16 @@ def atualizar_planilha():
         )
     )
 
+    resultados_novas_loterias = (
+        buscar_resultados_resultadofacil_novas_loterias(
+            dias_retroativos=3
+        )
+    )
+
     resultados = combinar_resultados_fontes(
         resultados_jb,
         resultados_complementares,
+        resultados_novas_loterias,
     )
 
     if not resultados:
@@ -1551,7 +1933,7 @@ def atualizar_planilha():
             "mensagem": (
                 "Nenhum resultado encontrado nas fontes configuradas."
             ),
-            "fonte": "JB_CERTO+RESULTADO_FACIL_LOTEP",
+            "fonte": "JB_CERTO+RESULTADO_FACIL",
             "inseridos": 0,
             "resultados_lidos": 0,
             "ignorados_por_duplicidade": 0,
@@ -1633,9 +2015,9 @@ def atualizar_planilha():
 
     return {
         "ok": True,
-        "fonte": "JB_CERTO+RESULTADO_FACIL_LOTEP",
+        "fonte": "JB_CERTO+RESULTADO_FACIL",
         "mensagem": (
-            "Atualização JB Certo + complemento LOTEP concluída."
+            "Atualização JB Certo + Resultado Fácil concluída."
         ),
         "resultados_lidos": len(
             resultados
@@ -1705,9 +2087,16 @@ def preview():
             )
         )
 
+        resultados_novas_loterias = (
+            buscar_resultados_resultadofacil_novas_loterias(
+                dias_retroativos=3
+            )
+        )
+
         resultados = combinar_resultados_fontes(
             resultados_jb,
             resultados_complementares,
+            resultados_novas_loterias,
         )
 
         resumo_loterias = {}
@@ -1730,7 +2119,7 @@ def preview():
 
         return jsonify({
             "ok": True,
-            "fonte": "JB Certo + complemento Resultado Fácil LOTEP",
+            "fonte": "JB Certo + Resultado Fácil (LOTEP + novas loterias)",
             "total": len(
                 resultados
             ),
@@ -1748,6 +2137,58 @@ def preview():
             "traceback": traceback.format_exc(),
         }), 500
         
+
+# =====================================================
+# PREVIEW SOMENTE DAS NOVAS LOTERIAS
+# Não grava nada na planilha.
+# =====================================================
+
+@app.route("/preview-novas-loterias")
+def preview_novas_loterias():
+    try:
+        resultados = (
+            buscar_resultados_resultadofacil_novas_loterias(
+                dias_retroativos=3
+            )
+        )
+
+        resumo_loterias = {}
+
+        for resultado in resultados:
+            loteria = resultado[
+                "loteria"
+            ]
+
+            resumo_loterias[
+                loteria
+            ] = (
+                resumo_loterias.get(
+                    loteria,
+                    0
+                )
+                + 1
+            )
+
+        return jsonify({
+            "ok": True,
+            "fonte": "Resultado Fácil",
+            "total": len(
+                resultados
+            ),
+            "por_loteria": resumo_loterias,
+            "resultados": resultados,
+        })
+
+    except Exception as e:
+        import traceback
+
+        return jsonify({
+            "ok": False,
+            "erro": str(e),
+            "traceback": traceback.format_exc(),
+        }), 500
+
+
 # =====================================================
 # PREVIEW RESULTADOS JB CERTO
 # Não grava nada na planilha.
