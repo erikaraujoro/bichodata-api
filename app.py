@@ -69,6 +69,7 @@ HORARIOS_VALIDOS_JBCERTO = {
 
     "PT-SP": {
         "08",
+        "09",
         "10",
         "12",
         "13",
@@ -101,6 +102,11 @@ URL_RESULTADO_FACIL_PARATODOS = (
 URL_RESULTADO_FACIL_LOTEP = (
     "https://www.resultadofacil.com.br/"
     "resultados-lotep-do-dia-"
+)
+
+URL_RESULTADO_FACIL_PTSP = (
+    "https://www.resultadofacil.com.br/"
+    "resultados-pt-sp-do-dia-"
 )
 
 HEADERS_RESULTADO_FACIL = {
@@ -757,6 +763,239 @@ def buscar_resultados_resultadofacil_lotep(
 
 
 
+def buscar_resultados_resultadofacil_ptsp09(
+    dias_retroativos=3
+):
+    """
+    Complementa a PT-SP com o novo sorteio das 09h
+    diretamente no Resultado Fácil.
+
+    A cada execução consulta hoje + os dias anteriores
+    definidos em dias_retroativos.
+
+    Apenas o bloco PTSP das 09:00 é aceito.
+    Federal e demais horários são ignorados.
+    """
+
+    hoje = datetime.now(
+        TIMEZONE_DADOS
+    ).date()
+
+    data_minima = hoje - timedelta(
+        days=max(
+            0,
+            int(
+                dias_retroativos
+            )
+        )
+    )
+
+    resultados = []
+    data_atual = data_minima
+
+    while data_atual <= hoje:
+        data_iso = data_atual.strftime(
+            "%Y-%m-%d"
+        )
+
+        data_br = data_atual.strftime(
+            "%d/%m/%Y"
+        )
+
+        url = (
+            URL_RESULTADO_FACIL_PTSP
+            + data_iso
+        )
+
+        try:
+            resp = requests.get(
+                url,
+                headers=HEADERS_RESULTADO_FACIL,
+                timeout=30,
+            )
+
+            if resp.status_code == 404:
+                data_atual += timedelta(
+                    days=1
+                )
+                continue
+
+            resp.raise_for_status()
+
+        except Exception as e:
+            logging.exception(
+                (
+                    "Erro Resultado Fácil "
+                    "PT-SP 09h %s: %s"
+                ),
+                url,
+                e,
+            )
+
+            data_atual += timedelta(
+                days=1
+            )
+            continue
+
+        variaveis = (
+            extrair_dataset_resultadofacil(
+                resp.text
+            )
+        )
+
+        premios_dict = {}
+
+        for item in variaveis:
+            if not isinstance(
+                item,
+                dict
+            ):
+                continue
+
+            nome = obter_campo_dataset(
+                item,
+                [
+                    "name",
+                    "nome",
+                ]
+            )
+
+            valor = obter_campo_dataset(
+                item,
+                [
+                    "value",
+                    "valor",
+                ]
+            )
+
+            if not nome or not valor:
+                continue
+
+            nome_upper = normalizar_texto(
+                nome
+            ).upper()
+
+            if "FEDERAL" in nome_upper:
+                continue
+
+            horario = (
+                extrair_horario_dataset(
+                    nome
+                )
+            )
+
+            if horario != "09":
+                continue
+
+            if not (
+                "PTSP" in nome_upper
+                or "PT SP" in nome_upper
+                or "PT-SP" in nome_upper
+                or "PTN SP" in nome_upper
+            ):
+                continue
+
+            posicao = (
+                extrair_posicao_dataset(
+                    nome
+                )
+            )
+
+            if posicao is None:
+                continue
+
+            milhar = (
+                extrair_milhar_dataset(
+                    valor
+                )
+            )
+
+            if not milhar:
+                continue
+
+            premios_dict[
+                posicao
+            ] = milhar
+
+        if all(
+            p in premios_dict
+            for p in range(
+                1,
+                6
+            )
+        ):
+            premios = [
+                premios_dict[1],
+                premios_dict[2],
+                premios_dict[3],
+                premios_dict[4],
+                premios_dict[5],
+            ]
+
+            m6, m7 = calcular_premios_6_7(
+                premios
+            )
+
+            linha = [
+                data_br,
+                "PT-SP",
+                "09",
+                premios[0],
+                premios[1],
+                premios[2],
+                premios[3],
+                premios[4],
+                m6,
+                m7,
+            ]
+
+            resultados.append({
+                "data": data_br,
+                "loteria": "PT-SP",
+                "horario": "09",
+                "premios": (
+                    premios
+                    + [
+                        m6,
+                        m7,
+                    ]
+                ),
+                "linha": linha,
+                "origem": "RESULTADO_FACIL_PTSP09",
+                "titulo_original": (
+                    "PT-SP 09h"
+                ),
+                "url_origem": url,
+            })
+
+        data_atual += timedelta(
+            days=1
+        )
+
+    resultados.sort(
+        key=lambda r: (
+            datetime.strptime(
+                r["data"],
+                "%d/%m/%Y"
+            ),
+            r["loteria"],
+            r["horario"],
+        )
+    )
+
+    logging.info(
+        (
+            "Resultado Fácil complemento PT-SP 09h: "
+            "%s resultado(s)."
+        ),
+        len(
+            resultados
+        ),
+    )
+
+    return resultados
+
+
 def buscar_resultados_resultadofacil_novas_loterias(
     dias_retroativos=3
 ):
@@ -1068,7 +1307,8 @@ def combinar_resultados_fontes(
     Ordem usada na automação:
     1) JB Certo
     2) Complemento LOTEP Resultado Fácil
-    3) Novas loterias Resultado Fácil
+    3) Complemento PT-SP 09h Resultado Fácil
+    4) Novas loterias Resultado Fácil
     """
 
     combinados = []
@@ -1911,6 +2151,12 @@ def atualizar_planilha():
         )
     )
 
+    resultados_ptsp09 = (
+        buscar_resultados_resultadofacil_ptsp09(
+            dias_retroativos=3
+        )
+    )
+
     resultados_novas_loterias = (
         buscar_resultados_resultadofacil_novas_loterias(
             dias_retroativos=3
@@ -1920,6 +2166,7 @@ def atualizar_planilha():
     resultados = combinar_resultados_fontes(
         resultados_jb,
         resultados_complementares,
+        resultados_ptsp09,
         resultados_novas_loterias,
     )
 
@@ -2119,7 +2366,7 @@ def preview():
 
         return jsonify({
             "ok": True,
-            "fonte": "JB Certo + Resultado Fácil (LOTEP + novas loterias)",
+            "fonte": "JB Certo + Resultado Fácil (LOTEP + PT-SP 09h + novas loterias)",
             "total": len(
                 resultados
             ),
@@ -2137,6 +2384,37 @@ def preview():
             "traceback": traceback.format_exc(),
         }), 500
         
+
+# =====================================================
+# PREVIEW SOMENTE PT-SP 09H
+# Não grava nada na planilha.
+# =====================================================
+
+@app.route("/preview-ptsp09")
+def preview_ptsp09():
+    try:
+        resultados = (
+            buscar_resultados_resultadofacil_ptsp09(
+                dias_retroativos=3
+            )
+        )
+
+        return jsonify({
+            "ok": True,
+            "fonte": "Resultado Fácil PT-SP 09h",
+            "total": len(resultados),
+            "resultados": resultados,
+        })
+
+    except Exception as e:
+        import traceback
+
+        return jsonify({
+            "ok": False,
+            "erro": str(e),
+            "traceback": traceback.format_exc(),
+        }), 500
+
 
 # =====================================================
 # PREVIEW SOMENTE DAS NOVAS LOTERIAS
