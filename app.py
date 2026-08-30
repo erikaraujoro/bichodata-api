@@ -235,21 +235,34 @@ def limpar_texto_planilha(valor):
 
 def carregar_chaves_existentes(ws):
     """
-    Chave para evitar duplicidade: Data + Loteria + Horário.
-    Normaliza horário para 2 dígitos para evitar duplicar 9 e 09.
+    Carrega duas travas da planilha:
+
+    1) Data + Loteria + Horário
+    2) Data + Loteria + M1 + M2 + M3 + M4 + M5
+
+    A segunda identifica o sorteio pelo conteúdo e impede que uma
+    fonte com horário incorreto duplique um resultado já publicado.
     """
     valores = ws.get_all_values()
-    chaves = set()
+    chaves_horario = set()
+    assinaturas_resultado = set()
 
     for linha in valores[1:]:
-        if len(linha) >= 3:
-            data = limpar_texto_planilha(linha[0])
-            loteria = limpar_texto_planilha(linha[1])
-            horario = limpar_texto_planilha(linha[2]).zfill(2)
-            if data and loteria and horario:
-                chaves.add(f"{data}|{loteria}|{horario}")
+        if len(linha) < 8:
+            continue
 
-    return chaves
+        data = limpar_texto_planilha(linha[0])
+        loteria = limpar_texto_planilha(linha[1])
+        horario = limpar_texto_planilha(linha[2]).zfill(2)
+        premios = [formatar_milhar(linha[i]) for i in range(3, 8)]
+
+        if data and loteria and horario:
+            chaves_horario.add(f"{data}|{loteria}|{horario}")
+
+        if data and loteria and all(premios):
+            assinaturas_resultado.add("|".join([data, loteria] + premios))
+
+    return chaves_horario, assinaturas_resultado
 
 
 # =========================
@@ -1293,52 +1306,126 @@ def buscar_resultados_resultadofacil_novas_loterias(
     return resultados
 
 
-def combinar_resultados_fontes(
-    *fontes_resultados
-):
+def normalizar_horario_por_calendario(data_br, loteria, horario):
     """
-    Combina múltiplas fontes usando a chave:
+    Ajustes oficiais conhecidos por data/dia da semana.
 
-        Data + Loteria + Horário
-
-    A fonte passada primeiro tem prioridade caso a
-    mesma chave apareça novamente em outra fonte.
-
-    Ordem usada na automação:
-    1) JB Certo
-    2) Complemento LOTEP Resultado Fácil
-    3) Complemento PT-SP 09h Resultado Fácil
-    4) Novas loterias Resultado Fácil
+    PT-RJ: a partir de 29/08/2026, aos sábados, o sorteio que algumas
+    fontes ainda identificam como 18h deve ser tratado como 19h.
     """
+    loteria = str(loteria or "").strip().upper()
+    horario = str(horario or "").strip().zfill(2)
 
+    try:
+        data_obj = datetime.strptime(str(data_br), "%d/%m/%Y").date()
+    except Exception:
+        return horario
+
+    if (
+        loteria == "PT-RJ"
+        and data_obj >= datetime(2026, 8, 29).date()
+        and data_obj.weekday() == 5
+        and horario == "18"
+    ):
+        return "19"
+
+    return horario
+
+
+def assinatura_resultado(resultado):
+    premios = [formatar_milhar(v) for v in resultado.get("premios", [])[:5]]
+    if len(premios) != 5 or not all(premios):
+        return ""
+    return "|".join([
+        str(resultado.get("data", "")).strip(),
+        str(resultado.get("loteria", "")).strip(),
+        *premios,
+    ])
+
+
+def resultado_tem_horario_preferencial(resultado):
+    horario = str(resultado.get("horario", "")).zfill(2)
+    esperado = normalizar_horario_por_calendario(
+        resultado.get("data", ""),
+        resultado.get("loteria", ""),
+        horario,
+    )
+    return horario == esperado
+
+
+def combinar_resultados_fontes(*fontes_resultados):
+    """
+    Combina as fontes com duas travas:
+
+    - Data + Loteria + Horário
+    - Data + Loteria + M1..M5
+
+    A fonte passada primeiro continua tendo prioridade. Para a regra
+    conhecida da PT-RJ aos sábados, 19h é preferido a 18h quando os
+    cinco primeiros prêmios são idênticos.
+    """
     combinados = []
-    chaves = set()
+    indice_por_horario = {}
+    indice_por_assinatura = {}
 
     for fonte in fontes_resultados:
-        for resultado in fonte:
-            chave = (
-                f"{resultado['data']}|"
-                f"{resultado['loteria']}|"
-                f"{str(resultado['horario']).zfill(2)}"
+        for resultado_original in fonte:
+            resultado = dict(resultado_original)
+            resultado["linha"] = list(resultado_original.get("linha", []))
+
+            horario_original = str(resultado.get("horario", "")).zfill(2)
+            horario_normalizado = normalizar_horario_por_calendario(
+                resultado.get("data", ""),
+                resultado.get("loteria", ""),
+                horario_original,
             )
 
-            if chave in chaves:
+            resultado["horario"] = horario_normalizado
+            if len(resultado["linha"]) >= 3:
+                resultado["linha"][2] = horario_normalizado
+
+            chave_horario = (
+                f"{resultado.get('data', '')}|"
+                f"{resultado.get('loteria', '')}|"
+                f"{horario_normalizado}"
+            )
+            assinatura = assinatura_resultado(resultado)
+
+            indice_existente = None
+            if chave_horario in indice_por_horario:
+                indice_existente = indice_por_horario[chave_horario]
+            elif assinatura and assinatura in indice_por_assinatura:
+                indice_existente = indice_por_assinatura[assinatura]
+
+            if indice_existente is not None:
+                existente = combinados[indice_existente]
+
+                # Se o existente veio de 18h normalizado e agora chegou
+                # explicitamente 19h, preserva a identificação oficial.
+                if (
+                    str(existente.get("loteria", "")).upper() == "PT-RJ"
+                    and existente.get("data") == resultado.get("data")
+                    and assinatura
+                    and assinatura_resultado(existente) == assinatura
+                    and str(existente.get("horario_origem", existente.get("horario", ""))).zfill(2) == "18"
+                    and horario_original == "19"
+                ):
+                    resultado["horario_origem"] = horario_original
+                    combinados[indice_existente] = resultado
+                    indice_por_horario[chave_horario] = indice_existente
+                    indice_por_assinatura[assinatura] = indice_existente
                 continue
 
-            chaves.add(
-                chave
-            )
-
-            combinados.append(
-                resultado
-            )
+            resultado["horario_origem"] = horario_original
+            indice = len(combinados)
+            combinados.append(resultado)
+            indice_por_horario[chave_horario] = indice
+            if assinatura:
+                indice_por_assinatura[assinatura] = indice
 
     combinados.sort(
         key=lambda r: (
-            datetime.strptime(
-                r["data"],
-                "%d/%m/%Y"
-            ),
+            datetime.strptime(r["data"], "%d/%m/%Y"),
             r["loteria"],
             r["horario"],
         )
@@ -2192,11 +2279,10 @@ def atualizar_planilha():
         ws
     )
 
-    chaves_existentes = (
-        carregar_chaves_existentes(
-            ws
-        )
-    )
+    (
+        chaves_existentes,
+        assinaturas_existentes,
+    ) = carregar_chaves_existentes(ws)
 
     novas_linhas = []
     ignorados = []
@@ -2217,21 +2303,24 @@ def atualizar_planilha():
             f"{horario}"
         )
 
+        assinatura = assinatura_resultado(resultado)
+
         if chave in chaves_existentes:
-
-            ignorados.append(
-                chave
-            )
-
+            ignorados.append(f"HORARIO:{chave}")
             continue
 
-        novas_linhas.append(
-            resultado["linha"]
-        )
+        if assinatura and assinatura in assinaturas_existentes:
+            ignorados.append(f"PREMIOS:{assinatura}")
+            continue
 
-        chaves_existentes.add(
-            chave
-        )
+        linha = list(resultado["linha"])
+        if len(linha) >= 3:
+            linha[2] = horario
+
+        novas_linhas.append(linha)
+        chaves_existentes.add(chave)
+        if assinatura:
+            assinaturas_existentes.add(assinatura)
 
     if novas_linhas:
 
